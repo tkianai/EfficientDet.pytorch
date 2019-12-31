@@ -25,12 +25,10 @@ class EfficientDet(nn.Module):
                  D_bifpn=3,
                  W_bifpn=88,
                  D_class=3,
-                 is_training=True,
                  threshold=0.5,
                  iou_threshold=0.5):
         super(EfficientDet, self).__init__()
         self.backbone = EfficientNet.from_pretrained(MODEL_MAP[network])
-        self.is_training = is_training
         self.neck = BIFPN(in_channels=self.backbone.get_list_features()[-5:],
                                 out_channels=W_bifpn,
                                 stack=D_bifpn,
@@ -61,7 +59,7 @@ class EfficientDet(nn.Module):
         classification = torch.cat([out for out in outs[0]], dim=1)
         regression = torch.cat([out for out in outs[1]], dim=1)
         anchors = self.anchors(inputs)
-        if self.is_training:
+        if self.training:
             classification_loss, regression_loss = self.criterion(classification, regression, anchors, annotations)
             return {"cls_loss": classification_loss, "reg_loss": regression_loss}
         else:

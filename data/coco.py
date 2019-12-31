@@ -65,7 +65,7 @@ class COCODataset(tDataset):
         if self.transforms is not None:
             output = self.transforms(**output)
 
-        return output
+        return output, idx
 
     def load_image(self, image_id):
         """根据图片id读取对应的图片
