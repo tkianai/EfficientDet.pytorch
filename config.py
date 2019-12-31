@@ -24,12 +24,6 @@ def get_default_cfg():
     cfg.model.name = "efficientdet-d0"
     cfg.model.resume = ""
 
-    cfg.train = CN()
-    cfg.train.max_epoch = 12
-    cfg.train.batch_size = 12
-    cfg.train.checkpoint_period = 1
-    cfg.train.log_period = 20
-
     cfg.dataloader = CN()
     cfg.dataloader.num_workers = 8
 
@@ -38,23 +32,19 @@ def get_default_cfg():
     cfg.solver.momentum = 0.9
     cfg.solver.weight_decay = 5e-4
     cfg.solver.gamma = 0.1
-
-
-
-
+    cfg.solver.batch_size = 12
     cfg.solver.test_period = 100
     cfg.solver.checkpoint_period = 100
     cfg.solver.log_period = 50
-    cfg.solver.ims_per_gpu = 4
-    cfg.solver.max_iter = 25000
+    cfg.solver.max_iter = 7000
     
     cfg.solver.bias_lr = 0.01
     cfg.solver.bias_weight_decay = 1e-5
     
-    cfg.solver.steps = [6, 9]
+    cfg.solver.steps = [3000, 6000]
     
     cfg.solver.warmup_factor = 0.1
-    cfg.solver.warmup_epochs = 3
+    cfg.solver.warmup_iters = 500
     cfg.solver.warmup_method = "linear"
 
     cfg.test = CN()
@@ -101,7 +91,7 @@ def lr_scheduler_kwargs(cfg):
         'steps': cfg.solver.steps,
         'gamma': cfg.solver.gamma,
         'warmup_factor': cfg.solver.warmup_factor,
-        'warmup_epochs': cfg.solver.warmup_epochs,
+        'warmup_iters': cfg.solver.warmup_iters,
         'warmup_method': cfg.solver.warmup_method,
     }
 

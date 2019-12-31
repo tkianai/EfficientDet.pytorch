@@ -12,14 +12,13 @@ from utils.checkpoint import Checkpointer
 from utils.logger import setup_logger
 from engine import do_train
 from solver import build_optimizer, build_lr_scheduler
+from data import COCODataset
 
 
 def train(cfg, local_rank, distributed):
 
-    train_dataloader = build_dataloader(cfg, is_train=True, distributed=distributed)
-
-    model = EfficientDet(
-        num_classes=train_dataloader.dataset.num_classes, **model_kwargs(cfg))
+    num_classes = COCODataset(cfg.data.train[0], cfg.data.train[1]).num_classes
+    model = EfficientDet(num_classes=num_classes, **model_kwargs(cfg))
     device = torch.device(cfg.device)
     model.to(device)
 
@@ -41,13 +40,15 @@ def train(cfg, local_rank, distributed):
         )
 
     arguments = {}
-    arguments["epoch"] = 0
-    arguments["max_epoch"] = cfg.train.max_epoch
+    arguments["iteration"] = 0
     output_dir = cfg.output_dir
     save_to_disk = comm.get_rank() == 0
     checkpointer = Checkpointer(model, optimizer, lr_scheduler, output_dir, save_to_disk)
     extra_checkpoint_data = checkpointer.load(cfg.model.resume)
     arguments.update(extra_checkpoint_data)
+
+    train_dataloader = build_dataloader(
+        cfg, is_train=True, distributed=distributed, start_iter=arguments["iteration"])
 
     test_period = cfg.test.test_period
     if test_period > 0:
@@ -55,8 +56,8 @@ def train(cfg, local_rank, distributed):
     else:
         val_dataloader = None
 
-    checkpoint_period = cfg.train.checkpoint_period
-    log_period = cfg.train.log_period
+    checkpoint_period = cfg.solver.checkpoint_period
+    log_period = cfg.solver.log_period
 
     do_train(
         cfg,
