@@ -1,4 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 from collections import defaultdict
 from collections import deque
 
