@@ -5,33 +5,26 @@ from apex import amp
 import torch
 import utils.comm as comm
 import utils.misc as misc
-from data import build_transform, COCODataset, detection_collate
+from data import build_dataloader
 from models import EfficientDet
-from config import get_default_cfg, model_kwargs
+from config import get_default_cfg, model_kwargs, optimizer_kwargs, lr_scheduler_kwargs
 from utils.checkpoint import Checkpointer
 from utils.logger import setup_logger
 from engine import do_train
+from solver import build_optimizer, build_lr_scheduler
 
 
 def train(cfg, local_rank, distributed):
 
-    train_transforms = build_transform(True, width=cfg.data.width, height=cfg.data.height)
-    train_dataset = COCODataset(
-        cfg.data.train[0], cfg.data.train[1], transforms=train_transforms)
-    sampler = torch.utils.data.DistributedSampler(train_dataset, shuffle=True) if distributed else torch.utils.data.RandomSampler(train_dataset)
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        num_workers=cfg.dataloader.num_workers,
-        batch_size=cfg.train.batch_size,
-        collate_fn=detection_collate,
-    )
+    train_dataloader = build_dataloader(cfg, is_train=True, distributed=distributed)
 
-    model = EfficientDet(num_classes=train_dataset.num_classes, **model_kwargs(cfg))
+    model = EfficientDet(
+        num_classes=train_dataloader.dataset.num_classes, **model_kwargs(cfg))
     device = torch.device(cfg.device)
     model.to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.solver.lr)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
+    optimizer = build_optimizer(model, **optimizer_kwargs(cfg))
+    lr_scheduler = build_lr_scheduler(optimizer, **lr_scheduler_kwargs(cfg))
 
     use_mixed_precision = cfg.dtype == "float16"
     amp_opt_level = 'O1' if use_mixed_precision else 'O0'
@@ -58,12 +51,7 @@ def train(cfg, local_rank, distributed):
 
     test_period = cfg.test.test_period
     if test_period > 0:
-        val_dataloader = make_dataloader(
-            cfg,
-            is_train=False,
-            is_distributed=distributed,
-            is_for_period=True
-        )
+        val_dataloader = build_dataloader(cfg, is_train=False, distributed=distributed)
     else:
         val_dataloader = None
 
@@ -84,7 +72,6 @@ def train(cfg, local_rank, distributed):
         log_period,
         arguments
     )
-
 
     return model
 

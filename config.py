@@ -25,7 +25,7 @@ def get_default_cfg():
     cfg.model.resume = ""
 
     cfg.train = CN()
-    cfg.train.max_epoch = 500
+    cfg.train.max_epoch = 12
     cfg.train.batch_size = 12
     cfg.train.checkpoint_period = 1
     cfg.train.log_period = 20
@@ -34,7 +34,7 @@ def get_default_cfg():
     cfg.dataloader.num_workers = 8
 
     cfg.solver = CN()
-    cfg.solver.lr = 1e-4
+    cfg.solver.lr = 0.001
     cfg.solver.momentum = 0.9
     cfg.solver.weight_decay = 5e-4
     cfg.solver.gamma = 0.1
@@ -51,10 +51,10 @@ def get_default_cfg():
     cfg.solver.bias_lr = 0.01
     cfg.solver.bias_weight_decay = 1e-5
     
-    cfg.solver.steps = [1000, 3000]
+    cfg.solver.steps = [6, 9]
     
     cfg.solver.warmup_factor = 0.1
-    cfg.solver.warmup_iters = 500
+    cfg.solver.warmup_epochs = 3
     cfg.solver.warmup_method = "linear"
 
     cfg.test = CN()
@@ -98,19 +98,19 @@ def get_default_cfg():
 
 def lr_scheduler_kwargs(cfg):
     return {
+        'steps': cfg.solver.steps,
+        'gamma': cfg.solver.gamma,
         'warmup_factor': cfg.solver.warmup_factor,
-        'warmup_iters': cfg.solver.warmup_iters,
+        'warmup_epochs': cfg.solver.warmup_epochs,
         'warmup_method': cfg.solver.warmup_method,
     }
 
 
 def optimizer_kwargs(cfg):
     return {
-        'lr': cfg.data.lr,
-        'weight_decay': cfg.data.weight_decay,
-        'bias_lr': cfg.data.bias_lr,
-        'bias_weight_decay': cfg.data.bias_weight_decay,
-        'momentum': cfg.data.momentum,
+        'lr': cfg.solver.lr,
+        'weight_decay': cfg.solver.weight_decay,
+        'momentum': cfg.solver.momentum,
     }
 
 
