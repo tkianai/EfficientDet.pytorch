@@ -2,9 +2,9 @@
 Accurate, fast EfficientDet implementation with pytorch
 
 
-**Many pytorch implementations of EfficientDet only support training with multi-gpu using `DataParallel` wrapper, Which caused slow speed and gpu imbalanced!!!**
-
 **We support Distributed training with multi-gpu using `DistributedDataParallel`!!!**
+
+> Compared to multi-gpu training using `DataParallel`, it's fast and gpu-balanced!
 
 ## Features
 
