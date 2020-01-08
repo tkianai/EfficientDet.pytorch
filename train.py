@@ -5,20 +5,22 @@ from apex import amp
 import torch
 import utils.comm as comm
 import utils.misc as misc
+from data import COCODataset
 from data import build_dataloader
 from models import EfficientDet
-from config import get_default_cfg, model_kwargs, optimizer_kwargs, lr_scheduler_kwargs
+from config import get_default_cfg, optimizer_kwargs, lr_scheduler_kwargs
 from utils.checkpoint import Checkpointer
 from utils.logger import setup_logger
 from engine import do_train
 from solver import build_optimizer, build_lr_scheduler
-from data import COCODataset
+
 
 
 def train(cfg, local_rank, distributed):
 
     num_classes = COCODataset(cfg.data.train[0], cfg.data.train[1]).num_classes
-    model = EfficientDet(num_classes=num_classes, **model_kwargs(cfg))
+    model = EfficientDet(num_classes=num_classes, model_name=cfg.model.name)
+    inp_size = model.config['inp_size']
     device = torch.device(cfg.device)
     model.to(device)
 
@@ -48,11 +50,12 @@ def train(cfg, local_rank, distributed):
     arguments.update(extra_checkpoint_data)
 
     train_dataloader = build_dataloader(
-        cfg, is_train=True, distributed=distributed, start_iter=arguments["iteration"])
+        cfg, inp_size, is_train=True, distributed=distributed, start_iter=arguments["iteration"])
 
     test_period = cfg.test.test_period
     if test_period > 0:
-        val_dataloader = build_dataloader(cfg, is_train=False, distributed=distributed)
+        val_dataloader = build_dataloader(
+            cfg, inp_size, is_train=False, distributed=distributed)
     else:
         val_dataloader = None
 
@@ -96,6 +99,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+
 def main():
     args = parse_args()
     num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
@@ -130,6 +134,7 @@ def main():
     misc.save_config(cfg, output_config_path)
 
     model = train(cfg, args.local_rank, args.distributed)
+
 
 if __name__ == "__main__":
     main()

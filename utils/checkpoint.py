@@ -3,6 +3,7 @@ import logging
 import os
 
 import torch
+from .model_serialization import load_state_dict
 
 
 class Checkpointer(object):
@@ -48,6 +49,7 @@ class Checkpointer(object):
         if self.has_checkpoint() and use_latest:
             # override argument with existing checkpoint
             f = self.get_checkpoint_file()
+            print("Loading ", f)
         if not f:
             # no checkpoint could be found
             self.logger.info(

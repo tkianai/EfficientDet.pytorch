@@ -12,6 +12,87 @@ from utils.metric_logger import MetricLogger
 
 from apex import amp
 
+'''
+def compute_on_dataset(model, data_loader, device, timer=None):
+    model.eval()
+    results_dict = {}
+    cpu_device = torch.device("cpu")
+    for _, batch in enumerate(tqdm(data_loader)):
+        images, targets, meta = batch
+        with torch.no_grad():
+            if timer:
+                timer.tic()
+            scores, labels, bboxes = model(images.to(device))
+            if timer:
+                if not device.type == 'cpu':
+                    torch.cuda.synchronize()
+                timer.toc()
+            output = [o.to(cpu_device) for o in output]
+        results_dict.update(
+            {img_id: result for img_id, result in zip(image_ids, output)}
+        )
+    return results_dict
+
+
+def do_infer(
+        model,
+        data_loader,
+        dataset_name,
+        device="cuda",
+        output_folder=None,
+):
+    # convert to a torch.device for efficiency
+    device = torch.device(device)
+    num_devices = get_world_size()
+    logger = logging.getLogger("EfficientDet.inference")
+    dataset = data_loader.dataset
+    logger.info("Start evaluation on {} dataset({} images).".format(
+        dataset_name, len(dataset)))
+    total_timer = Timer()
+    inference_timer = Timer()
+    total_timer.tic()
+    predictions = compute_on_dataset(model, data_loader, device, inference_timer)
+    # wait for all processes to complete before measuring the time
+    synchronize()
+    total_time = total_timer.toc()
+    total_time_str = get_time_str(total_time)
+    logger.info(
+        "Total run time: {} ({} s / img per device, on {} devices)".format(
+            total_time_str, total_time *
+            num_devices / len(dataset), num_devices
+        )
+    )
+    total_infer_time = get_time_str(inference_timer.total_time)
+    logger.info(
+        "Model inference time: {} ({} s / img per device, on {} devices)".format(
+            total_infer_time,
+            inference_timer.total_time * num_devices / len(dataset),
+            num_devices,
+        )
+    )
+
+    predictions = _accumulate_predictions_from_multiple_gpus(predictions)
+    if not is_main_process():
+        return
+
+    if output_folder:
+        torch.save(predictions, os.path.join(output_folder, "predictions.pth"))
+
+    extra_args = dict(
+        box_only=box_only,
+        iou_types=iou_types,
+        expected_results=expected_results,
+        expected_results_sigma_tol=expected_results_sigma_tol,
+    )
+
+    return evaluate(dataset=dataset,
+                    predictions=predictions,
+                    output_folder=output_folder,
+                    **extra_args)
+
+'''
+
+
 
 def reduce_loss_dict(loss_dict):
     """
@@ -114,7 +195,20 @@ def do_train(
             )
         if iteration % checkpoint_period == 0:
             checkpointer.save("model_{:07d}".format(iteration), **arguments)
-        
+        '''
+        if val_dataloader is not None and test_period > 0 and iteration % test_period == 0:
+            meters_val = MetricLogger(delimiter="  ")
+            synchronize()
+            _ = do_infer(  # The result can be used for additional logging, e. g. for TensorBoard
+                model,
+                val_dataloader,
+                dataset_name="[Validation]",
+                device=cfg.device,
+                output_folder=None,
+            )
+            synchronize()
+            model.train()
+        '''
         if iteration == max_iter:
             checkpointer.save("model_final", **arguments)
 

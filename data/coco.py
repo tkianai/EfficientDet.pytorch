@@ -21,7 +21,7 @@ class COCODataset(tDataset):
         
         Keyword Arguments:
             transforms {transform} -- 图片增强方式 (default: {None})
-        """        
+        """
         self.root = root
         self.transforms = transforms
         self.coco = COCO(ann_file)
@@ -30,7 +30,7 @@ class COCODataset(tDataset):
 
     def relabel_classes(self):
         """重新整理类别顺序
-        """        
+        """
         categories = self.coco.loadCats(self.coco.getCatIds())
         categories.sort(key=lambda x: x['id'])
         # 名字->id
@@ -43,7 +43,7 @@ class COCODataset(tDataset):
             self.coco_labels[len(self.classes)] = cat['id']
             self.coco_labels_inv[cat['id']] = len(self.classes)
             self.classes[cat['name']] = len(self.classes)
-        
+
         # id->名字
         self.labels = {value: key for key, value in self.classes.items()}
 
@@ -53,19 +53,15 @@ class COCODataset(tDataset):
     def __getitem__(self, idx):
         image = self.load_image(idx)
         annotations = self.load_annotations(idx)
-        targets = np.array(annotations)
-        bboxes = targets[:, :4]
-        labels = np.array(targets[:, 4], dtype=np.int)
-
-        output = {
+        sample = {
             "image": image,
-            "bboxes": bboxes,
-            "labels": labels
+            "bboxes": annotations[:, :4],
+            "labels": annotations[:, 4]
         }
         if self.transforms is not None:
-            output = self.transforms(**output)
+            sample = self.transforms(sample)
 
-        return output, idx
+        return sample, idx
 
     def load_image(self, image_id):
         """根据图片id读取对应的图片
@@ -75,14 +71,13 @@ class COCODataset(tDataset):
         
         Returns:
             numpy.ndarray -- BGR形式的numpy数组
-        """        
+        """
         image_info = self.coco.loadImgs(self.image_ids[image_id])[0]
         image = cv2.imread(osp.join(self.root, image_info["file_name"]))
         if len(image.shape) == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
         return image
 
-    
     def load_annotations(self, image_id):
         """根据图片id读取其所有的标注框
         
@@ -91,8 +86,9 @@ class COCODataset(tDataset):
         
         Returns:
             numpy.ndarray -- Nx5数组，代表N个框，每个框前四个元素为位置，最后一个元素为类别
-        """        
-        annotation_ids = self.coco.getAnnIds(imgIds=self.image_ids[image_id], iscrowd=False)
+        """
+        annotation_ids = self.coco.getAnnIds(
+            imgIds=self.image_ids[image_id], iscrowd=False)
         annotations = np.zeros((0, 5))
 
         # 如果没有标注
@@ -114,7 +110,7 @@ class COCODataset(tDataset):
         annotations[:, 3] = annotations[:, 1] + annotations[:, 3]
 
         return annotations
-        
+
     def relabel_coco_label(self, coco_label):
         return self.coco_labels_inv[coco_label]
 

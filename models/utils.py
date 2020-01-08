@@ -1,311 +1,150 @@
-import re
-import math
-import collections
-from functools import partial
 import torch
-from torch import nn
-from torch.nn import functional as F
-from torch.utils import model_zoo
-
-########################################################################
-############### HELPERS FUNCTIONS FOR MODEL ARCHITECTURE ###############
-########################################################################
+import torch.nn as nn
+import numpy as np
 
 
-# Parameters for the entire model (stem, all blocks, and head)
-GlobalParams = collections.namedtuple('GlobalParams', [
-    'batch_norm_momentum', 'batch_norm_epsilon', 'dropout_rate',
-    'num_classes', 'width_coefficient', 'depth_coefficient',
-    'depth_divisor', 'min_depth', 'drop_connect_rate', 'image_size'])
+class BBoxTransform(nn.Module):
 
-# Parameters for an individual model block
-BlockArgs = collections.namedtuple('BlockArgs', [
-    'kernel_size', 'num_repeat', 'input_filters', 'output_filters',
-    'expand_ratio', 'id_skip', 'stride', 'se_ratio'])
-
-# Change namedtuple defaults
-GlobalParams.__new__.__defaults__ = (None,) * len(GlobalParams._fields)
-BlockArgs.__new__.__defaults__ = (None,) * len(BlockArgs._fields)
-
-
-class SwishImplementation(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, i):
-        result = i * torch.sigmoid(i)
-        ctx.save_for_backward(i)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        i = ctx.saved_variables[0]
-        sigmoid_i = torch.sigmoid(i)
-        return grad_output * (sigmoid_i * (1 + i * (1 - sigmoid_i)))
-
-
-class MemoryEfficientSwish(nn.Module):
-    def forward(self, x):
-        return SwishImplementation.apply(x)
-
-class Swish(nn.Module):
-    def forward(self, x):
-        return x * torch.sigmoid(x)
-
-
-def round_filters(filters, global_params):
-    """ Calculate and round number of filters based on depth multiplier. """
-    multiplier = global_params.width_coefficient
-    if not multiplier:
-        return filters
-    divisor = global_params.depth_divisor
-    min_depth = global_params.min_depth
-    filters *= multiplier
-    min_depth = min_depth or divisor
-    new_filters = max(min_depth, int(filters + divisor / 2) // divisor * divisor)
-    if new_filters < 0.9 * filters:  # prevent rounding by more than 10%
-        new_filters += divisor
-    return int(new_filters)
-
-
-def round_repeats(repeats, global_params):
-    """ Round number of filters based on depth multiplier. """
-    multiplier = global_params.depth_coefficient
-    if not multiplier:
-        return repeats
-    return int(math.ceil(multiplier * repeats))
-
-
-def drop_connect(inputs, p, training):
-    """ Drop connect. """
-    if not training: return inputs
-    batch_size = inputs.shape[0]
-    keep_prob = 1 - p
-    random_tensor = keep_prob
-    random_tensor += torch.rand([batch_size, 1, 1, 1], dtype=inputs.dtype, device=inputs.device)
-    binary_tensor = torch.floor(random_tensor)
-    output = inputs / keep_prob * binary_tensor
-    return output
-
-
-def get_same_padding_conv2d(image_size=None):
-    """ Chooses static padding if you have specified an image size, and dynamic padding otherwise.
-        Static padding is necessary for ONNX exporting of models. """
-    if image_size is None:
-        return Conv2dDynamicSamePadding
-    else:
-        return partial(Conv2dStaticSamePadding, image_size=image_size)
-
-
-class Conv2dDynamicSamePadding(nn.Conv2d):
-    """ 2D Convolutions like TensorFlow, for a dynamic image size """
-
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1, bias=True):
-        super().__init__(in_channels, out_channels, kernel_size, stride, 0, dilation, groups, bias)
-        self.stride = self.stride if len(self.stride) == 2 else [self.stride[0]] * 2
-
-    def forward(self, x):
-        ih, iw = x.size()[-2:]
-        kh, kw = self.weight.size()[-2:]
-        sh, sw = self.stride
-        oh, ow = math.ceil(ih / sh), math.ceil(iw / sw)
-        pad_h = max((oh - 1) * self.stride[0] + (kh - 1) * self.dilation[0] + 1 - ih, 0)
-        pad_w = max((ow - 1) * self.stride[1] + (kw - 1) * self.dilation[1] + 1 - iw, 0)
-        if pad_h > 0 or pad_w > 0:
-            x = F.pad(x, [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2])
-        return F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
-
-
-class Conv2dStaticSamePadding(nn.Conv2d):
-    """ 2D Convolutions like TensorFlow, for a fixed image size"""
-
-    def __init__(self, in_channels, out_channels, kernel_size, image_size=None, **kwargs):
-        super().__init__(in_channels, out_channels, kernel_size, **kwargs)
-        self.stride = self.stride if len(self.stride) == 2 else [self.stride[0]] * 2
-
-        # Calculate padding based on image size and save it
-        assert image_size is not None
-        ih, iw = image_size if type(image_size) == list else [image_size, image_size]
-        kh, kw = self.weight.size()[-2:]
-        sh, sw = self.stride
-        oh, ow = math.ceil(ih / sh), math.ceil(iw / sw)
-        pad_h = max((oh - 1) * self.stride[0] + (kh - 1) * self.dilation[0] + 1 - ih, 0)
-        pad_w = max((ow - 1) * self.stride[1] + (kw - 1) * self.dilation[1] + 1 - iw, 0)
-        if pad_h > 0 or pad_w > 0:
-            self.static_padding = nn.ZeroPad2d((pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2))
+    def __init__(self, mean=None, std=None):
+        super(BBoxTransform, self).__init__()
+        if mean is None:
+            self.mean = torch.from_numpy(
+                np.array([0, 0, 0, 0]).astype(np.float32))
         else:
-            self.static_padding = Identity()
+            self.mean = mean
+        if std is None:
+            self.std = torch.from_numpy(
+                np.array([0.1, 0.1, 0.2, 0.2]).astype(np.float32))
+        else:
+            self.std = std
 
-    def forward(self, x):
-        x = self.static_padding(x)
-        x = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
-        return x
+    def forward(self, boxes, deltas):
 
+        device = boxes.device
+        mean = self.mean.to(device)
+        std = self.std.to(device)
 
-class Identity(nn.Module):
-    def __init__(self, ):
-        super(Identity, self).__init__()
+        widths = boxes[:, :, 2] - boxes[:, :, 0]
+        heights = boxes[:, :, 3] - boxes[:, :, 1]
+        ctr_x = boxes[:, :, 0] + 0.5 * widths
+        ctr_y = boxes[:, :, 1] + 0.5 * heights
 
-    def forward(self, input):
-        return input
+        dx = deltas[:, :, 0] * std[0] + mean[0]
+        dy = deltas[:, :, 1] * std[1] + mean[1]
+        dw = deltas[:, :, 2] * std[2] + mean[2]
+        dh = deltas[:, :, 3] * std[3] + mean[3]
 
+        pred_ctr_x = ctr_x + dx * widths
+        pred_ctr_y = ctr_y + dy * heights
+        pred_w = torch.exp(dw) * widths
+        pred_h = torch.exp(dh) * heights
 
-########################################################################
-############## HELPERS FUNCTIONS FOR LOADING MODEL PARAMS ##############
-########################################################################
+        pred_boxes_x1 = pred_ctr_x - 0.5 * pred_w
+        pred_boxes_y1 = pred_ctr_y - 0.5 * pred_h
+        pred_boxes_x2 = pred_ctr_x + 0.5 * pred_w
+        pred_boxes_y2 = pred_ctr_y + 0.5 * pred_h
 
+        pred_boxes = torch.stack(
+            [pred_boxes_x1, pred_boxes_y1, pred_boxes_x2, pred_boxes_y2], dim=2)
 
-def efficientnet_params(model_name):
-    """ Map EfficientNet model name to parameter coefficients. """
-    params_dict = {
-        # Coefficients:   width,depth,res,dropout
-        'efficientnet-b0': (1.0, 1.0, 224, 0.2),
-        'efficientnet-b1': (1.0, 1.1, 240, 0.2),
-        'efficientnet-b2': (1.1, 1.2, 260, 0.3),
-        'efficientnet-b3': (1.2, 1.4, 300, 0.3),
-        'efficientnet-b4': (1.4, 1.8, 380, 0.4),
-        'efficientnet-b5': (1.6, 2.2, 456, 0.4),
-        'efficientnet-b6': (1.8, 2.6, 528, 0.5),
-        'efficientnet-b7': (2.0, 3.1, 600, 0.5),
-    }
-    return params_dict[model_name]
-
-
-class BlockDecoder(object):
-    """ Block Decoder for readability, straight from the official TensorFlow repository """
-
-    @staticmethod
-    def _decode_block_string(block_string):
-        """ Gets a block through a string notation of arguments. """
-        assert isinstance(block_string, str)
-
-        ops = block_string.split('_')
-        options = {}
-        for op in ops:
-            splits = re.split(r'(\d.*)', op)
-            if len(splits) >= 2:
-                key, value = splits[:2]
-                options[key] = value
-
-        # Check stride
-        assert (('s' in options and len(options['s']) == 1) or
-                (len(options['s']) == 2 and options['s'][0] == options['s'][1]))
-
-        return BlockArgs(
-            kernel_size=int(options['k']),
-            num_repeat=int(options['r']),
-            input_filters=int(options['i']),
-            output_filters=int(options['o']),
-            expand_ratio=int(options['e']),
-            id_skip=('noskip' not in block_string),
-            se_ratio=float(options['se']) if 'se' in options else None,
-            stride=[int(options['s'][0])])
-
-    @staticmethod
-    def _encode_block_string(block):
-        """Encodes a block to a string."""
-        args = [
-            'r%d' % block.num_repeat,
-            'k%d' % block.kernel_size,
-            's%d%d' % (block.strides[0], block.strides[1]),
-            'e%s' % block.expand_ratio,
-            'i%d' % block.input_filters,
-            'o%d' % block.output_filters
-        ]
-        if 0 < block.se_ratio <= 1:
-            args.append('se%s' % block.se_ratio)
-        if block.id_skip is False:
-            args.append('noskip')
-        return '_'.join(args)
-
-    @staticmethod
-    def decode(string_list):
-        """
-        Decodes a list of string notations to specify blocks inside the network.
-        :param string_list: a list of strings, each string is a notation of block
-        :return: a list of BlockArgs namedtuples of block args
-        """
-        assert isinstance(string_list, list)
-        blocks_args = []
-        for block_string in string_list:
-            blocks_args.append(BlockDecoder._decode_block_string(block_string))
-        return blocks_args
-
-    @staticmethod
-    def encode(blocks_args):
-        """
-        Encodes a list of BlockArgs to a list of strings.
-        :param blocks_args: a list of BlockArgs namedtuples of block args
-        :return: a list of strings, each string is a notation of block
-        """
-        block_strings = []
-        for block in blocks_args:
-            block_strings.append(BlockDecoder._encode_block_string(block))
-        return block_strings
+        return pred_boxes
 
 
-def efficientnet(width_coefficient=None, depth_coefficient=None, dropout_rate=0.2,
-                 drop_connect_rate=0.2, image_size=None, num_classes=1000):
-    """ Creates a efficientnet model. """
+class ClipBoxes(nn.Module):
 
-    blocks_args = [
-        'r1_k3_s11_e1_i32_o16_se0.25', 'r2_k3_s22_e6_i16_o24_se0.25',
-        'r2_k5_s22_e6_i24_o40_se0.25', 'r3_k3_s22_e6_i40_o80_se0.25',
-        'r3_k5_s22_e6_i80_o112_se0.25', 'r4_k5_s22_e6_i112_o192_se0.25',
-        'r1_k3_s22_e6_i192_o320_se0.25',
-    ]
-    blocks_args = BlockDecoder.decode(blocks_args)
+    def __init__(self):
+        super(ClipBoxes, self).__init__()
 
-    global_params = GlobalParams(
-        batch_norm_momentum=0.99,
-        batch_norm_epsilon=1e-3,
-        dropout_rate=dropout_rate,
-        drop_connect_rate=drop_connect_rate,
-        # data_format='channels_last',  # removed, this is always true in PyTorch
-        num_classes=num_classes,
-        width_coefficient=width_coefficient,
-        depth_coefficient=depth_coefficient,
-        depth_divisor=8,
-        min_depth=None,
-        image_size=image_size,
-    )
+    def forward(self, boxes, img):
+        batch_size, num_channels, height, width = img.shape
 
-    return blocks_args, global_params
+        boxes[:, :, 0] = torch.clamp(boxes[:, :, 0], min=0)
+        boxes[:, :, 1] = torch.clamp(boxes[:, :, 1], min=0)
+
+        boxes[:, :, 2] = torch.clamp(boxes[:, :, 2], max=width)
+        boxes[:, :, 3] = torch.clamp(boxes[:, :, 3], max=height)
+
+        return boxes
 
 
-def get_model_params(model_name, override_params):
-    """ Get the block args and global params for a given model """
-    if model_name.startswith('efficientnet'):
-        w, d, s, p = efficientnet_params(model_name)
-        # note: all models have drop connect rate = 0.2
-        blocks_args, global_params = efficientnet(
-            width_coefficient=w, depth_coefficient=d, dropout_rate=p, image_size=s)
-    else:
-        raise NotImplementedError('model name is not pre-defined: %s' % model_name)
-    if override_params:
-        # ValueError will be raised here if override_params has fields not included in global_params.
-        global_params = global_params._replace(**override_params)
-    return blocks_args, global_params
+class Anchors(nn.Module):
+    def __init__(self, pyramid_levels=None, strides=None, sizes=None, ratios=None, scales=None):
+        super(Anchors, self).__init__()
+
+        if pyramid_levels is None:
+            self.pyramid_levels = [3, 4, 5, 6, 7]
+        if strides is None:
+            self.strides = [2 ** x for x in self.pyramid_levels]
+        if sizes is None:
+            self.sizes = [2 ** (x + 2) for x in self.pyramid_levels]
+        if ratios is None:
+            self.ratios = np.array([0.5, 1, 2])
+        if scales is None:
+            self.scales = np.array(
+                [2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)])
+
+    def forward(self, image):
+
+        image_shape = image.shape[2:]
+        image_shape = np.array(image_shape)
+        image_shapes = [(image_shape + 2 ** x - 1) // (2 ** x)
+                        for x in self.pyramid_levels]
+
+        all_anchors = np.zeros((0, 4)).astype(np.float32)
+
+        for idx, p in enumerate(self.pyramid_levels):
+            anchors = generate_anchors(
+                base_size=self.sizes[idx], ratios=self.ratios, scales=self.scales)
+            shifted_anchors = shift(
+                image_shapes[idx], self.strides[idx], anchors)
+            all_anchors = np.append(all_anchors, shifted_anchors, axis=0)
+
+        all_anchors = np.expand_dims(all_anchors, axis=0)
+
+        anchors = torch.from_numpy(all_anchors.astype(np.float32))
+        anchors = anchors.to(image.device)
+        return anchors
 
 
-url_map = {
-    'efficientnet-b0': 'http://storage.googleapis.com/public-models/efficientnet/efficientnet-b0-355c32eb.pth',
-    'efficientnet-b1': 'http://storage.googleapis.com/public-models/efficientnet/efficientnet-b1-f1951068.pth',
-    'efficientnet-b2': 'http://storage.googleapis.com/public-models/efficientnet/efficientnet-b2-8bb594d6.pth',
-    'efficientnet-b3': 'http://storage.googleapis.com/public-models/efficientnet/efficientnet-b3-5fb5a3c3.pth',
-    'efficientnet-b4': 'http://storage.googleapis.com/public-models/efficientnet/efficientnet-b4-6ed6700e.pth',
-    'efficientnet-b5': 'http://storage.googleapis.com/public-models/efficientnet/efficientnet-b5-b6417697.pth',
-    'efficientnet-b6': 'http://storage.googleapis.com/public-models/efficientnet/efficientnet-b6-c76e70fd.pth',
-    'efficientnet-b7': 'http://storage.googleapis.com/public-models/efficientnet/efficientnet-b7-dcc49843.pth',
-}
+def generate_anchors(base_size=16, ratios=None, scales=None):
+    if ratios is None:
+        ratios = np.array([0.5, 1, 2])
+
+    if scales is None:
+        scales = np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)])
+
+    num_anchors = len(ratios) * len(scales)
+    anchors = np.zeros((num_anchors, 4))
+    anchors[:, 2:] = base_size * np.tile(scales, (2, len(ratios))).T
+    areas = anchors[:, 2] * anchors[:, 3]
+    anchors[:, 2] = np.sqrt(areas / np.repeat(ratios, len(scales)))
+    anchors[:, 3] = anchors[:, 2] * np.repeat(ratios, len(scales))
+    anchors[:, 0::2] -= np.tile(anchors[:, 2] * 0.5, (2, 1)).T
+    anchors[:, 1::2] -= np.tile(anchors[:, 3] * 0.5, (2, 1)).T
+
+    return anchors
 
 
-def load_pretrained_weights(model, model_name, load_fc=True):
-    """ Loads pretrained weights, and downloads if loading for the first time. """
-    state_dict = model_zoo.load_url(url_map[model_name])
-    if load_fc:
-        model.load_state_dict(state_dict)
-    else:
-        state_dict.pop('_fc.weight')
-        state_dict.pop('_fc.bias')
-        res = model.load_state_dict(state_dict, strict=False)
-        assert set(res.missing_keys) == set(['_fc.weight', '_fc.bias']), 'issue loading pretrained weights'
-    print('Loaded pretrained weights for {}'.format(model_name))
+def compute_shape(image_shape, pyramid_levels):
+    image_shape = np.array(image_shape[:2])
+    image_shapes = [(image_shape + 2 ** x - 1) // (2 ** x)
+                    for x in pyramid_levels]
+    return image_shapes
+
+
+def shift(shape, stride, anchors):
+    shift_x = (np.arange(0, shape[1]) + 0.5) * stride
+    shift_y = (np.arange(0, shape[0]) + 0.5) * stride
+    shift_x, shift_y = np.meshgrid(shift_x, shift_y)
+    shifts = np.vstack((
+        shift_x.ravel(), shift_y.ravel(),
+        shift_x.ravel(), shift_y.ravel()
+    )).transpose()
+
+    A = anchors.shape[0]
+    K = shifts.shape[0]
+    all_anchors = (anchors.reshape((1, A, 4)) +
+                   shifts.reshape((1, K, 4)).transpose((1, 0, 2)))
+    all_anchors = all_anchors.reshape((K * A, 4))
+
+    return all_anchors

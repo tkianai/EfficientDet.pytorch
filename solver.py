@@ -48,13 +48,19 @@ class WarmupMultiStepLR(torch.optim.lr_scheduler._LRScheduler):
         ]
 
 
-
-
-def build_optimizer(model, lr=0.01, weight_decay=5e-4, momentum=0.9):
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+def build_optimizer(model, lr=0.01, weight_decay=5e-4, bias_lr=0.01, bias_weight_decay=5e-4, momentum=0.9):
+    params = []
+    for key, value in model.named_parameters():
+        if not value.requires_grad:
+            continue
+        _lr = lr
+        _weight_decay = weight_decay
+        if "bias" in key:
+            _lr = bias_lr
+            _weight_decay = bias_weight_decay
+        params += [{"params": [value], "lr": _lr, "weight_decay": _weight_decay}]
+    optimizer = torch.optim.SGD(params, lr, momentum=momentum)
     return optimizer
-
 
 
 def build_lr_scheduler(optimizer, steps=None, gamma=0.1, warmup_factor=0.1, warmup_iters=500, warmup_method="linear"):
