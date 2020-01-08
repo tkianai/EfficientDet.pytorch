@@ -29,7 +29,7 @@ Accurate, fast EfficientDet implementation with pytorch
 - [x] distributed training
 - [x] distributed evaluation
 - [ ] speed up data loading
-- [ ] inference demo for images and video
+- [x] inference demo for images and video
 - [ ] model zoo
 - [ ] tensorrt speed up
 - [ ] time consuming analysis

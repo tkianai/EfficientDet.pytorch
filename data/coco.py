@@ -33,7 +33,7 @@ class COCODataset(tDataset):
         """
         categories = self.coco.loadCats(self.coco.getCatIds())
         categories.sort(key=lambda x: x['id'])
-        # 名字->id
+        # 名字->重新排序的id
         self.classes = {}
         # 重新排序的id->原id
         self.coco_labels = {}
@@ -44,7 +44,7 @@ class COCODataset(tDataset):
             self.coco_labels_inv[cat['id']] = len(self.classes)
             self.classes[cat['name']] = len(self.classes)
 
-        # id->名字
+        # 重新排序的id->名字
         self.labels = {value: key for key, value in self.classes.items()}
 
     def __len__(self):

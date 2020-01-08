@@ -87,7 +87,7 @@ def main():
 
     dataset = COCODataset(cfg.data.test[0], cfg.data.test[1])
     num_classes = dataset.num_classes
-    label_map = dataset.coco_labels
+    label_map = dataset.labels
     model = EfficientDet(num_classes=num_classes, model_name=cfg.model.name)
     device = torch.device(cfg.device)
     model.to(device)
