@@ -10,10 +10,6 @@ from .loss import FocalLoss
 from .utils import Anchors, BBoxTransform, ClipBoxes
 
 
-def nms(dets, thresh):
-    return nms_torch(dets[:, :4], dets[:, 4], thresh)
-
-
 _EFFICIENTDET = {
     'efficientdet-d0': {'backbone': 'efficientnet-b0', 'W_bifpn': 64, 'D_bifpn': 2, 'D_class': 3, 'inp_size': 512},
     'efficientdet-d1': {'backbone': 'efficientnet-b1', 'W_bifpn': 88, 'D_bifpn': 3, 'D_class': 3, 'inp_size': 640},
@@ -103,22 +99,51 @@ class EfficientDet(nn.Module):
                 'regression_loss': reg_loss
             }
         else:
+            # 增加batch预测功能
             transformed_anchors = self.regressBoxes(anchors, regression)
+            # anchor预测结果 (B, N, 4)
             transformed_anchors = self.clipBoxes(transformed_anchors, inputs)
-
+            # 每个anchor对应的类别的最大得分
             scores = torch.max(classification, dim=2, keepdim=True)[0]
+            # 通过得分阈值筛选有效anchor位置
+            scores_over_thresh = (scores > self.score_thr)[:, :, 0]
+            # 对每一张图像分别进行后处理
+            batch_size = scores.shape[0]
+            outputs = []
+            for i in range(batch_size):
+                result = []
+                # 第i个样本的有效anchor位置
+                scores_over_thresh_i = scores_over_thresh[i, :]
+                # 有矩形框进行后处理
+                if scores_over_thresh_i.sum() > 0:
+                    # 第i个样本的每个类别得分
+                    classification_i = classification[i, scores_over_thresh_i, :]
+                    # 第i个样本的举行框
+                    transformed_anchors_i = transformed_anchors[i, scores_over_thresh_i, :]
+                    # 第i个样本的所有有效anchor分数
+                    scores_i = scores[i, scores_over_thresh_i, 0]
+                    # 通过分数进行nms（所有类别，此处不是multi-label nms）
+                    anchors_nms_idx = nms_torch(transformed_anchors_i, scores_i, self.iou_thr)
+                    # 获取通过nms后保留下来的anchor分数以及类别
+                    nms_scores_i, nms_class_i = classification_i[anchors_nms_idx, :].max(dim=1)
+                    # nms后保留下来的矩形框
+                    nms_bboxes_i = transformed_anchors_i[anchors_nms_idx, :]
+                    # xyxy -> xywh
+                    nms_bboxes_i[:, 2] -= nms_bboxes_i[:, 0]
+                    nms_bboxes_i[:, 3] -= nms_bboxes_i[:, 1]
 
-            scores_over_thresh = (scores > self.score_thr)[0, :, 0]
+                    for j in range(nms_bboxes_i.shape[0]):
+                        _score = float(nms_scores_i[j])
+                        _label = int(nms_class_i[j])
+                        _box = nms_bboxes_i[j, :]
 
-            if scores_over_thresh.sum() == 0:
-                return [torch.zeros(0), torch.zeros(0), torch.zeros(0, 4)]
+                        item = {
+                            'class': _label,
+                            'score': _score,
+                            'bbox': _box.tolist(),
+                        }
+                        result.append(item)
 
-            classification = classification[:, scores_over_thresh, :]
-            transformed_anchors = transformed_anchors[:, scores_over_thresh, :]
-            scores = scores[:, scores_over_thresh, :]
+                outputs.append(result)
 
-            anchors_nms_idx = nms(torch.cat([transformed_anchors, scores], dim=2)[0, :, :], self.iou_thr)
-
-            nms_scores, nms_class = classification[0, anchors_nms_idx, :].max(dim=1)
-
-            return [nms_scores, nms_class, transformed_anchors[0, anchors_nms_idx, :]]
+            return outputs

@@ -8,7 +8,7 @@ from .samplers import build_sampler, build_batch_sampler
 
 
 def build_dataloader(cfg, inp_size, is_train=True, distributed=False, start_iter=0):
-    batch_size = cfg.solver.ims_per_batch
+    batch_size = cfg.solver.ims_per_gpu
     if is_train:
         root, ann_file = cfg.data.train
         num_iters = cfg.solver.max_iter

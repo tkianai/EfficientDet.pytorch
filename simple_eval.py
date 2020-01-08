@@ -20,30 +20,17 @@ def evaluate_coco(dataset, model, threshold=0.05):
         for index in range(len(dataset)):
             data = dataset[index][0]
             scale = data['scale']
-            scores, labels, boxes = model(data['image'].cuda().permute(2, 0, 1).float().unsqueeze(dim=0))
-            boxes /= scale
+            outputs = model(data['image'].cuda().permute(2, 0, 1).float().unsqueeze(dim=0))
+            for item in outputs[0]:
 
-            if boxes.shape[0] > 0:
+                image_result = {
+                    'image_id': dataset.image_ids[index],
+                    'category_id': dataset.return_coco_label(item['class']),
+                    'score': item['score'],
+                    'bbox': [e / scale for e in item['bbox']],
+                }
 
-                boxes[:, 2] -= boxes[:, 0]
-                boxes[:, 3] -= boxes[:, 1]
-
-                for box_id in range(boxes.shape[0]):
-                    score = float(scores[box_id])
-                    label = int(labels[box_id])
-                    box = boxes[box_id, :]
-
-                    if score < threshold:
-                        break
-
-                    image_result = {
-                        'image_id': dataset.image_ids[index],
-                        'category_id': dataset.return_coco_label(label),
-                        'score': float(score),
-                        'bbox': box.tolist(),
-                    }
-
-                    results.append(image_result)
+                results.append(image_result)
 
             # append image to list of processed images
             image_ids.append(dataset.image_ids[index])
