@@ -23,3 +23,16 @@ Accurate, fast EfficientDet implementation with pytorch
 
 `python demo.py --img <image path> model.resume <checkpoint path>`
 
+
+# TODO
+
+- [x] distributed training
+- [x] distributed evaluation
+- [ ] speed up data loading
+- [ ] inference demo for images and video
+- [ ] model zoo
+- [ ] tensorrt speed up
+- [ ] time consuming analysis
+- [ ] add chinese commnets
+- [ ] clean code
+- [ ] tensorboard visulize

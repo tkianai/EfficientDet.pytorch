@@ -119,6 +119,7 @@ def do_infer(
             for e in prediction
         ])
 
+    map_05_09 = 0
     with tempfile.NamedTemporaryFile() as f:
         file_path = f.name
         output_folder = './'
@@ -137,7 +138,9 @@ def do_infer(
         coco_eval.evaluate()
         coco_eval.accumulate()
         coco_eval.summarize()
-    
+
+        map_05_09 = coco_eval.stats[0]
+    return map_05_09
 
 
 def reduce_loss_dict(loss_dict):
@@ -241,16 +244,17 @@ def do_train(
             )
         if iteration % checkpoint_period == 0:
             checkpointer.save("model_{:07d}".format(iteration), **arguments)
-        if val_dataloader is not None and test_period > 0 and iteration % test_period == 0:
+        if val_dataloader is not None and ((test_period > 0 and iteration % test_period == 0) or iteration == max_iter):
             meters_val = MetricLogger(delimiter="  ")
             synchronize()
-            _ = do_infer(  # The result can be used for additional logging, e. g. for TensorBoard
+            map_05_09 = do_infer(  # The result can be used for additional logging, e. g. for TensorBoard
                 model,
                 val_dataloader,
                 dataset_name="[Validation]",
                 device=cfg.device,
                 output_folder=None,
             )
+            logger.info("Validation MAP 0.5:0.9 ===> {}".format(map_05_09))
             synchronize()
             model.train()
         if iteration == max_iter:
