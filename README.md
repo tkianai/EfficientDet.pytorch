@@ -1,4 +1,5 @@
-# EfficientDet.pytorch
+# EfficientDet: Scalable and Efficient Object Detection
+
 Accurate, fast EfficientDet implementation with pytorch
 
 
