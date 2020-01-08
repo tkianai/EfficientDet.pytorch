@@ -81,7 +81,7 @@ class EfficientDet(nn.Module):
                 m.eval()
 
 
-    def forward(self, inputs, targets=None):
+    def forward(self, inputs, targets=None, meta=None):
         bone_feats = self.backbone(inputs)
         trans_feats = []
         for feat, conv in zip(bone_feats, self.trans_conv):
@@ -109,6 +109,8 @@ class EfficientDet(nn.Module):
             scores_over_thresh = (scores > self.score_thr)[:, :, 0]
             # 对每一张图像分别进行后处理
             batch_size = scores.shape[0]
+            if meta is not None:
+                scales = meta['scale']
             outputs = []
             for i in range(batch_size):
                 result = []
@@ -131,6 +133,8 @@ class EfficientDet(nn.Module):
                     # xyxy -> xywh
                     nms_bboxes_i[:, 2] -= nms_bboxes_i[:, 0]
                     nms_bboxes_i[:, 3] -= nms_bboxes_i[:, 1]
+                    # scale to the original size
+                    nms_bboxes_i /= scales[i]
 
                     for j in range(nms_bboxes_i.shape[0]):
                         _score = float(nms_scores_i[j])
@@ -145,5 +149,4 @@ class EfficientDet(nn.Module):
                         result.append(item)
 
                 outputs.append(result)
-
             return outputs

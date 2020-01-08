@@ -1,18 +1,23 @@
 import datetime
 import logging
 import os
+import json
 import time
+import tempfile
 
 import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
-from utils.comm import get_world_size, synchronize
+from utils.comm import get_world_size, synchronize, all_gather, is_main_process
 from utils.metric_logger import MetricLogger
+from utils.timer import Timer, get_time_str
+
+from pycocotools.cocoeval import COCOeval
 
 from apex import amp
 
-'''
+
 def compute_on_dataset(model, data_loader, device, timer=None):
     model.eval()
     results_dict = {}
@@ -22,16 +27,40 @@ def compute_on_dataset(model, data_loader, device, timer=None):
         with torch.no_grad():
             if timer:
                 timer.tic()
-            scores, labels, bboxes = model(images.to(device))
+            outputs = model(images.to(device), meta=meta)
             if timer:
                 if not device.type == 'cpu':
                     torch.cuda.synchronize()
                 timer.toc()
-            output = [o.to(cpu_device) for o in output]
+            # output = [o.to(cpu_device) for o in output]
+            
         results_dict.update(
-            {img_id: result for img_id, result in zip(image_ids, output)}
+            {idx: result for idx, result in zip(meta['index'], outputs)}
         )
     return results_dict
+
+
+def _accumulate_predictions_from_multiple_gpus(predictions_per_gpu):
+    all_predictions = all_gather(predictions_per_gpu)
+    if not is_main_process():
+        return
+    # merge the list of dicts
+    predictions = {}
+    for p in all_predictions:
+        predictions.update(p)
+    # convert a dict where the key is the index in a list
+    image_ids = list(sorted(predictions.keys()))
+    if len(image_ids) != image_ids[-1] + 1:
+        logger = logging.getLogger("EfficientDet.inference")
+        logger.warning(
+            "Number of images that were gathered from multiple processes is not "
+            "a contiguous set. Some images might be missing from the evaluation"
+        )
+
+    # convert to a list
+    predictions = [predictions[i] for i in image_ids]
+    return predictions
+
 
 
 def do_infer(
@@ -75,23 +104,40 @@ def do_infer(
     if not is_main_process():
         return
 
-    if output_folder:
-        torch.save(predictions, os.path.join(output_folder, "predictions.pth"))
+    coco_results = []
+    image_ids = []
+    for image_id, prediction in enumerate(predictions):
+        original_id = dataset.image_ids[image_id]
+        image_ids.append(original_id)
+        coco_results.extend([
+            {
+                "image_id": original_id,
+                "category_id": dataset.return_coco_label(e['class']),
+                "bbox": e['bbox'],
+                "score": e['score']
+            }
+            for e in prediction
+        ])
 
-    extra_args = dict(
-        box_only=box_only,
-        iou_types=iou_types,
-        expected_results=expected_results,
-        expected_results_sigma_tol=expected_results_sigma_tol,
-    )
+    with tempfile.NamedTemporaryFile() as f:
+        file_path = f.name
+        output_folder = './'
+        if output_folder:
+            file_path = os.path.join(output_folder, 'bbox_results.json')
+        with open(file_path, "w") as w_obj:
+            json.dump(coco_results, w_obj)
 
-    return evaluate(dataset=dataset,
-                    predictions=predictions,
-                    output_folder=output_folder,
-                    **extra_args)
+        # load results in COCO evaluation tool
+        coco_true = dataset.coco
+        coco_pred = coco_true.loadRes(file_path)
 
-'''
-
+        # run COCO evaluation
+        coco_eval = COCOeval(coco_true, coco_pred, 'bbox')
+        coco_eval.params.imgIds = image_ids
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
+    
 
 
 def reduce_loss_dict(loss_dict):
@@ -195,7 +241,6 @@ def do_train(
             )
         if iteration % checkpoint_period == 0:
             checkpointer.save("model_{:07d}".format(iteration), **arguments)
-        '''
         if val_dataloader is not None and test_period > 0 and iteration % test_period == 0:
             meters_val = MetricLogger(delimiter="  ")
             synchronize()
@@ -208,7 +253,6 @@ def do_train(
             )
             synchronize()
             model.train()
-        '''
         if iteration == max_iter:
             checkpointer.save("model_final", **arguments)
 

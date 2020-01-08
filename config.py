@@ -23,19 +23,17 @@ def get_default_cfg():
     cfg.solver.bias_weight_decay = 5e-4
     cfg.solver.momentum = 0.9
     cfg.solver.gamma = 0.1
-    cfg.solver.ims_per_gpu = 8
-
-    cfg.solver.checkpoint_period = 10000
-    cfg.solver.log_period = 50
-    
-    cfg.solver.max_iter = 70000
-    cfg.solver.steps = [30000, 60000]
+    cfg.solver.ims_per_gpu = 16
+    cfg.solver.max_iter = 120000
+    cfg.solver.steps = [50000, 90000]
     cfg.solver.warmup_factor = 0.1
     cfg.solver.warmup_iters = 3000
     cfg.solver.warmup_method = "linear"
+    cfg.solver.checkpoint_period = 10000
+    cfg.solver.log_period = 50
 
     cfg.test = CN()
-    cfg.test.test_period = 0
+    cfg.test.test_period = 10000
     cfg.test.ims_per_gpu = 8
 
     cfg.data = CN()

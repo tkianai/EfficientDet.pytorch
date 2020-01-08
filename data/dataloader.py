@@ -13,7 +13,7 @@ def build_dataloader(cfg, inp_size, is_train=True, distributed=False, start_iter
         root, ann_file = cfg.data.train
         num_iters = cfg.solver.max_iter
     else:
-        root, ann_file = cfg.data.train
+        root, ann_file = cfg.data.test
         num_iters = None
     transforms = build_transforms(is_train, inp_size=inp_size)
     dataset = COCODataset(root, ann_file, transforms=transforms)
