@@ -28,7 +28,7 @@ Accurate, fast EfficientDet implementation with pytorch
 
 - [x] distributed training
 - [x] distributed evaluation
-- [ ] speed up data loading
+- [ ] speed up data loading [16 images per gpu: 0.028]
 - [x] inference demo for images and video
 - [ ] model zoo
 - [ ] tensorrt speed up
@@ -36,3 +36,9 @@ Accurate, fast EfficientDet implementation with pytorch
 - [ ] add chinese commnets
 - [ ] clean code
 - [ ] tensorboard visulize
+
+
+
+## About
+
+Keep updating, please star~star~star
