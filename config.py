@@ -5,7 +5,7 @@ from yacs.config import CfgNode as CN
 
 def get_default_cfg():
     cfg = CN()
-    cfg.output_dir = "./work_dirs"
+    cfg.output_dir = "./work_dirs/paper"
     cfg.device = "cuda"
     cfg.dtype = "float32"
 
@@ -17,23 +17,23 @@ def get_default_cfg():
     cfg.dataloader.num_workers = 8
 
     cfg.solver = CN()
-    cfg.solver.lr = 0.001
-    cfg.solver.bias_lr = 0.002
-    cfg.solver.weight_decay = 5e-4
-    cfg.solver.bias_weight_decay = 5e-4
+    cfg.solver.lr = 0.08
+    cfg.solver.bias_lr = 0.08
+    cfg.solver.weight_decay = 4e-5
+    cfg.solver.bias_weight_decay = 4e-5
     cfg.solver.momentum = 0.9
     cfg.solver.gamma = 0.1
     cfg.solver.ims_per_gpu = 16
     cfg.solver.max_iter = 120000
     cfg.solver.steps = [50000, 90000]
-    cfg.solver.warmup_factor = 0.1
-    cfg.solver.warmup_iters = 3000
+    cfg.solver.warmup_factor = 0.01
+    cfg.solver.warmup_iters = 6000
     cfg.solver.warmup_method = "linear"
-    cfg.solver.checkpoint_period = 10000
+    cfg.solver.checkpoint_period = 5000
     cfg.solver.log_period = 50
 
     cfg.test = CN()
-    cfg.test.test_period = 10000
+    cfg.test.test_period = 5000
     cfg.test.ims_per_gpu = 8
 
     cfg.data = CN()

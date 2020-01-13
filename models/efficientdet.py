@@ -66,6 +66,8 @@ class EfficientDet(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
+                #m.eps = 1e-4
+                #m.momentum = 0.9998
 
         prior = 0.01
 

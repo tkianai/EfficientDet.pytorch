@@ -32,7 +32,7 @@ def calc_iou(a, b):
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=0.25, gamma=2.0, cls_eps=1e-4, neg_thr=0.4, pos_thr=0.5):
+    def __init__(self, alpha=0.25, gamma=1.5, cls_eps=1e-4, neg_thr=0.4, pos_thr=0.5):
         super().__init__()
         self.alpha = alpha
         self.gamma = gamma

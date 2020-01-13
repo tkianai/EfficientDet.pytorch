@@ -214,7 +214,9 @@ def do_train(
         # Otherwise apply loss scaling for mixed-precision recipe
         with amp.scale_loss(losses, optimizer) as scaled_losses:
             scaled_losses.backward()
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.1)
         optimizer.step()
+        # lr_scheduler.step(losses_reduced)
         lr_scheduler.step()
 
         batch_time = time.time() - end
